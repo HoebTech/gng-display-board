@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Game Night Guild — TV Board Launcher</title>
+<style>
+  :root{
+    --navy:#001534; --gold:#FCC00C; --cyan:#15A9E2;
+    --purple:#540C90; --magenta:#B32FD0; --cream:#FCFCF0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--navy); color:var(--cream);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    min-height:100vh; padding:4vh 4vw;
+    display:flex; flex-direction:column;
+  }
+  header{text-align:center;margin-bottom:3vh}
+  h1{font-size:clamp(24px,3.4vw,44px);letter-spacing:.02em;color:var(--gold)}
+  .sub{font-size:clamp(12px,1.2vw,18px);opacity:.7;margin-top:.6em}
+  .grid{
+    flex:1; display:grid; gap:2.2vh 2vw;
+    grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(2,1fr);
+  }
+  a.tile{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-decoration:none; color:var(--cream);
+    border:3px solid rgba(252,252,240,.18); border-radius:18px;
+    background:rgba(255,255,255,.04);
+    transition:transform .12s ease, border-color .12s ease, background .12s ease;
+    padding:2vh 1vw; text-align:center;
+  }
+  a.tile:focus, a.tile:hover{
+    outline:none; transform:scale(1.03);
+    border-color:var(--gold); background:rgba(252,192,12,.10);
+  }
+  .name{font-size:clamp(20px,2.6vw,38px);font-weight:700;letter-spacing:.01em}
+  .host{font-size:clamp(10px,1vw,15px);opacity:.55;margin-top:.7em;word-break:break-all}
+  .dot{
+    width:.7em;height:.7em;border-radius:50%;background:#666;
+    display:inline-block;margin-right:.5em;vertical-align:middle;
+    transition:background .3s ease;
+  }
+  .dot.warm{background:var(--cyan)}
+  .dot.cold{background:#c2410c}
+  footer{
+    margin-top:2.5vh;text-align:center;font-size:clamp(11px,1.1vw,16px);opacity:.6;
+  }
+  kbd{
+    background:rgba(255,255,255,.12);border-radius:4px;padding:.15em .5em;
+    font-family:inherit;font-size:.95em;
+  }
+  #status{margin-top:.6em;color:var(--gold);min-height:1.4em}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Game Night Guild — TV Boards</h1>
+  <div class="sub">Pick a board. All four are waking up in the background.</div>
+  <div id="status">Warming services…</div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  <kbd>Alt</kbd> + <kbd>&larr;</kbd> returns here from any board &nbsp;·&nbsp;
+  Cold services take 30&ndash;60s to answer &nbsp;·&nbsp;
+  Boards are display-only, no login
+</footer>
+
+<script>
+/* ------------------------------------------------------------------
+   EDIT THIS BLOCK ONLY.
+   Confirm each origin against the live site before your first pub run.
+   Linked Up's subdomain is a PLACEHOLDER - replace it.
+------------------------------------------------------------------ */
+var GAMES = [
+  { name: "Survey Says", origin: "https://survey-says.gamenightguild.app" },
+  { name: "Linked Up",   origin: "https://linked-up.gamenightguild.app" },
+  { name: "Off the Top", origin: "https://off-the-top.gamenightguild.app" },
+  { name: "Trivia",      origin: "https://trivia.gamenightguild.app" }
+];
+var BOARD_PATH = "/tv/board";
+/* ---------------------------------------------------------------- */
+
+var grid = document.getElementById("grid");
+var statusEl = document.getElementById("status");
+
+GAMES.forEach(function (g, i) {
+  var a = document.createElement("a");
+  a.className = "tile";
+  a.href = g.origin + BOARD_PATH;
+  a.id = "tile-" + i;
+
+  var n = document.createElement("div");
+  n.className = "name";
+
+  var dot = document.createElement("span");
+  dot.className = "dot";
+  dot.id = "dot-" + i;
+  n.appendChild(dot);
+  n.appendChild(document.createTextNode(g.name));
+
+  var h = document.createElement("div");
+  h.className = "host";
+  h.textContent = g.origin.replace("https://", "");
+
+  a.appendChild(n);
+  a.appendChild(h);
+  grid.appendChild(a);
+});
+
+// Wake every Render service in parallel. Free tier sleeps after ~15 min idle.
+var done = 0;
+GAMES.forEach(function (g, i) {
+  var dot = document.getElementById("dot-" + i);
+  var t0 = Date.now();
+  fetch(g.origin + BOARD_PATH, { mode: "no-cors", cache: "no-store" })
+    .then(function () {
+      var secs = Math.round((Date.now() - t0) / 1000);
+      dot.className = "dot " + (secs > 8 ? "cold" : "warm");
+      dot.title = g.name + " responded in " + secs + "s";
+    })
+    .catch(function () {
+      dot.className = "dot cold";
+      dot.title = g.name + " did not respond - check the URL or the network";
+    })
+    .then(function () {
+      done += 1;
+      if (done === GAMES.length) {
+        statusEl.textContent = "All four pinged. Blue = was already warm, orange = was cold or unreachable.";
+      }
+    });
+});
+
+// First tile focused so the remote's D-pad has somewhere to start.
+var first = document.getElementById("tile-0");
+if (first) { first.focus(); }
+
+// D-pad navigation across the 2x2 grid, so the bundled Fire TV remote
+// works even with no mouse or keyboard paired. Enter/Select fires the link.
+var COLS = 2;
+document.addEventListener("keydown", function (e) {
+  var active = document.activeElement;
+  if (!active || active.className.indexOf("tile") === -1) {
+    if (first) { first.focus(); }
+    return;
+  }
+  var i = parseInt(active.id.split("-")[1], 10);
+  var next = null;
+  if (e.key === "ArrowRight") { next = (i % COLS === COLS - 1) ? i - (COLS - 1) : i + 1; }
+  else if (e.key === "ArrowLeft") { next = (i % COLS === 0) ? i + (COLS - 1) : i - 1; }
+  else if (e.key === "ArrowDown") { next = (i + COLS) % GAMES.length; }
+  else if (e.key === "ArrowUp") { next = (i - COLS + GAMES.length) % GAMES.length; }
+  else { return; }
+  var el = document.getElementById("tile-" + next);
+  if (el) { el.focus(); e.preventDefault(); }
+});
+</script>
+
+</body>
+</html>
