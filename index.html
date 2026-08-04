@@ -51,10 +51,12 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
 .pill.ready{border-color:rgba(47,224,138,.4);background:rgba(47,224,138,.12);color:#8ff0c0}
 .pill.waking{border-color:rgba(255,201,30,.45);background:rgba(255,201,30,.12);color:#ffdd7a}
 .pill.down{border-color:rgba(255,120,90,.45);background:rgba(255,120,90,.12);color:#ffb3a0}
-.pill .host{font:500 22px 'JetBrains Mono',monospace;color:var(--dim)}
 .cta{display:flex;align-items:center;gap:20px}
 .okkey{display:grid;place-items:center;padding:20px 38px;border-radius:16px;background:var(--gold);
-  color:var(--navy);font:700 32px 'Poppins',sans-serif}
+  color:var(--navy);font:700 32px 'Poppins',sans-serif;cursor:pointer;user-select:none;
+  transition:transform .12s ease,box-shadow .12s ease}
+.okkey:active{transform:scale(.95)}
+.okkey.armed{box-shadow:0 0 0 6px rgba(255,201,30,.25)}
 .cta-text{font:400 30px 'DM Sans',sans-serif;color:#cfe2f2}
 .cta-hint{margin-left:26px;font:400 26px 'DM Sans',sans-serif;color:var(--dim2)}
 
@@ -96,12 +98,11 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
           <div class="hero-name" id="heroName">Survey<br>Says</div>
           <div class="pills">
             <span class="pill" id="heroPill">Checking board…</span>
-            <span class="pill host" id="heroHost"></span>
           </div>
         </div>
       </div>
       <div class="cta">
-        <span class="okkey">OK</span>
+        <span class="okkey" id="okBtn" role="button" tabindex="-1">OK</span>
         <span class="cta-text" id="ctaText">Start Survey Says</span>
         <span class="cta-hint">↑ ↓ to browse the night's lineup</span>
       </div>
@@ -135,7 +136,6 @@ var REPING_EVERY = 300000;  // ms — re-ping every 5 min so nothing sleeps mid-
 var listEl   = document.getElementById('list');
 var heroName = document.getElementById('heroName');
 var heroPill = document.getElementById('heroPill');
-var heroHost = document.getElementById('heroHost');
 var ctaText  = document.getElementById('ctaText');
 var sel = 0;
 
@@ -169,7 +169,9 @@ for (var i = 0; i < GAMES.length; i++) {
   listEl.appendChild(tile);
 
   (function (idx) {
-    tile.addEventListener('click', function () { select(idx); launch(idx); });
+    // Selecting a tile only changes what's 'up next' on the left.
+    // Launching is the OK button / remote select, never the tile itself.
+    tile.addEventListener('click', function () { select(idx); });
     tile.addEventListener('focus', function () { select(idx); });
   })(i);
 }
@@ -198,7 +200,6 @@ function paintHero() {
   heroPill.className = 'pill ' + (st.cls === 'ready' ? 'ready'
                                 : st.cls === 'woke' ? 'ready'
                                 : st.cls === 'down' ? 'down' : 'waking');
-  heroHost.textContent = g.origin.replace('https://', '');
   ctaText.textContent = 'Start ' + g.name;
 }
 
@@ -255,6 +256,15 @@ function probeAll(firstRun) {
 probeAll(true);
 setInterval(function () { probeAll(false); }, REPING_EVERY);
 
+/* ---- the yellow OK button is the only thing that launches ---- */
+var okBtn = document.getElementById('okBtn');
+okBtn.addEventListener('click', function () { launch(sel); });
+
+function flashOk() {
+  okBtn.className = 'okkey armed';
+  setTimeout(function () { okBtn.className = 'okkey'; }, 180);
+}
+
 /* ---- D-pad / keyboard: up-down browses, OK launches ---- */
 document.addEventListener('keydown', function (e) {
   var k = e.key, c = e.keyCode;
@@ -262,7 +272,7 @@ document.addEventListener('keydown', function (e) {
   else if (k === 'ArrowUp' || c === 38) { select(sel - 1); e.preventDefault(); }
   else if (k === 'ArrowRight' || c === 39) { select(sel + 1); e.preventDefault(); }
   else if (k === 'ArrowLeft' || c === 37) { select(sel - 1); e.preventDefault(); }
-  else if (k === 'Enter' || k === ' ' || c === 13 || c === 32) { launch(sel); e.preventDefault(); }
+  else if (k === 'Enter' || k === ' ' || c === 13 || c === 32) { flashOk(); launch(sel); e.preventDefault(); }
 });
 
 /* ---- scale the 1920x1080 stage to whatever the TV actually is ---- */
