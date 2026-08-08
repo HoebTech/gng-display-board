@@ -45,6 +45,7 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
 .kicker{font:500 26px 'JetBrains Mono',monospace;color:var(--cyan);letter-spacing:.24em;text-transform:uppercase}
 .hero-name{margin-top:18px;font:800 132px/.9 'Poppins',sans-serif;color:#fff;letter-spacing:-.035em}
 .hero-name.small{font-size:104px}
+.hero-name.tiny{font-size:82px}
 .pills{margin-top:34px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;min-height:64px}
 .pill{padding:12px 24px;border-radius:999px;font:500 24px 'DM Sans',sans-serif;
   border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.07);color:#cfe2f2}
@@ -61,16 +62,17 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
 .cta-hint{margin-left:26px;font:400 26px 'DM Sans',sans-serif;color:var(--dim2)}
 
 /* ---------- right / list ---------- */
-.right{position:relative;padding:80px 88px 72px 40px;display:flex;flex-direction:column;gap:22px;
+.right{position:relative;padding:70px 88px 60px 40px;display:flex;flex-direction:column;gap:16px;
   border-left:1px solid rgba(255,255,255,.10);background:rgba(0,20,52,.35)}
 .right h2{font:600 28px 'Poppins',sans-serif;color:#fff}
-.tile{display:flex;align-items:center;gap:22px;padding:32px 34px;border-radius:20px;cursor:pointer;
+#list{display:flex;flex-direction:column;gap:16px}
+.tile{display:flex;align-items:center;gap:22px;padding:26px 34px;border-radius:20px;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);
   transition:background .15s ease,border-color .15s ease,transform .15s ease}
 .tile:focus{outline:none}
 .tile.sel{background:linear-gradient(120deg,rgba(0,145,187,.24),rgba(0,145,187,.06));
-  border:2px solid var(--cyan);padding:31px 33px;transform:scale(1.015)}
-.tile .title{font:700 48px 'Poppins',sans-serif;color:#e8f2fa;white-space:nowrap;
+  border:2px solid var(--cyan);padding:25px 33px;transform:scale(1.015)}
+.tile .title{font:700 44px 'Poppins',sans-serif;color:#e8f2fa;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 .tile.sel .title{color:#fff}
 .tile .state{margin-top:6px;display:flex;align-items:center;gap:9px;
@@ -125,13 +127,21 @@ var GAMES = [
   { name: "Survey Says", line1: "Survey", line2: "Says",  origin: "https://survey-says.gamenightguild.app" },
   { name: "Linked Up",   line1: "Linked", line2: "Up",    origin: "https://linked-up.gamenightguild.app" },
   { name: "Off the Top", line1: "Off the", line2: "Top",  origin: "https://off-the-top.gamenightguild.app" },
-  { name: "Trivia",      line1: "Trivia", line2: "",      origin: "https://trivia.gamenightguild.app" }
+  { name: "Trivia",      line1: "Trivia", line2: "",      origin: "https://trivia.gamenightguild.app" },
+
+  // Tournaments serves its board at /board, not /tv/board, so it overrides the
+  // default with its own path. Add "?venue=2" here when you need one venue's
+  // screens instead of the combined board. ORIGIN IS A PLACEHOLDER - confirm it.
+  { name: "Tournaments", line1: "Tournaments", line2: "",
+    origin: "https://gng-tournaments.gamenightguild.app", path: "/board" }
 ];
-var BOARD_PATH   = "/tv/board";
+var BOARD_PATH   = "/tv/board";   // default; a game can override with "path"
 var WARM_CUTOFF  = 8000;    // ms — slower than this means the service was asleep
 var PROBE_TIMEOUT= 75000;   // ms — give a cold Render dyno time to boot
 var REPING_EVERY = 300000;  // ms — re-ping every 5 min so nothing sleeps mid-night
 /* ================================================================== */
+
+function boardPath(g) { return g.path || BOARD_PATH; }
 
 var listEl   = document.getElementById('list');
 var heroName = document.getElementById('heroName');
@@ -195,7 +205,8 @@ function paintHero() {
   heroName.appendChild(document.createTextNode(g.line1));
   if (g.line2) { heroName.appendChild(document.createElement('br'));
                  heroName.appendChild(document.createTextNode(g.line2)); }
-  heroName.className = 'hero-name' + (g.line1.length > 7 ? ' small' : '');
+  var longest = Math.max(g.line1.length, (g.line2 || '').length);
+  heroName.className = 'hero-name' + (longest > 9 ? ' tiny' : longest > 7 ? ' small' : '');
   heroPill.textContent = st.long;
   heroPill.className = 'pill ' + (st.cls === 'ready' ? 'ready'
                                 : st.cls === 'woke' ? 'ready'
@@ -212,7 +223,7 @@ function select(i) {
 }
 
 function launch(i) {
-  window.location.href = GAMES[i].origin + BOARD_PATH;
+  window.location.href = GAMES[i].origin + boardPath(GAMES[i]);
 }
 
 /* ---- wake + probe every service in parallel ---- */
@@ -229,7 +240,7 @@ function probe(i, firstRun) {
   var opts = { mode: 'no-cors', cache: 'no-store', credentials: 'omit' };
   if (ctrl) { opts.signal = ctrl.signal; }
 
-  fetch(g.origin + BOARD_PATH + '?ping=' + t0, opts)
+  fetch(g.origin + boardPath(g) + (boardPath(g).indexOf('?') === -1 ? '?' : '&') + 'ping=' + t0, opts)
     .then(function () {
       clearTimeout(timer);
       var ms = Date.now() - t0;
