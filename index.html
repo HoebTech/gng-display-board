@@ -113,7 +113,7 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
     <div class="right">
       <h2>Available games</h2>
       <div id="list"></div>
-      <div class="foot">Alt + ← returns here from any board · cold boards wake in 30–60s · boards are display-only, no login</div>
+      <div class="foot">Alt + ← returns here from any board · shared game server wakes in 30–60s · boards are display-only, no login</div>
     </div>
   </div>
 </div>
@@ -123,11 +123,21 @@ html,body{height:100%;background:var(--navy);overflow:hidden}
    EDIT THIS BLOCK ONLY.
    Confirm each origin against the live site before your first pub run.
    ================================================================== */
+
+// Survey Says, Linked Up, Off the Top and Pub Trivia all live in ONE app on
+// ONE Render service. Each game owns a route prefix; its public TV board is
+// <prefix>/tv/board. "shared: true" puts a game on the shared server check.
+var GUILD_ORIGIN = "https://games.gamenightguild.app";
+// A real image the shared app serves itself. It only fires onload if the app
+// answered with a decodable image, so a Render error or wake-up page can't
+// pass for "up" the way an opaque no-cors fetch can.
+var GUILD_PROBE  = "/static/gng-favicon.png";
+
 var GAMES = [
-  { name: "Survey Says", line1: "Survey", line2: "Says",  origin: "https://survey-says.gamenightguild.app" },
-  { name: "Linked Up",   line1: "Linked", line2: "Up",    origin: "https://linked-up.gamenightguild.app" },
-  { name: "Off the Top", line1: "Off the", line2: "Top",  origin: "https://off-the-top.gamenightguild.app" },
-  { name: "Trivia",      line1: "Trivia", line2: "",      origin: "https://trivia.gamenightguild.app" },
+  { name: "Survey Says", line1: "Survey", line2: "Says",   origin: GUILD_ORIGIN, path: "/survey/tv/board", shared: true },
+  { name: "Linked Up",   line1: "Linked", line2: "Up",     origin: GUILD_ORIGIN, path: "/linked/tv/board", shared: true },
+  { name: "Off the Top", line1: "Off the", line2: "Top",   origin: GUILD_ORIGIN, path: "/offtop/tv/board", shared: true },
+  { name: "Pub Trivia",  line1: "Pub",    line2: "Trivia", origin: GUILD_ORIGIN, path: "/trivia/tv/board", shared: true },
 
   // Tournaments serves its board at /board, not /tv/board, so it overrides the
   // default with its own path. Add "?venue=2" here when you need one venue's
@@ -138,6 +148,7 @@ var GAMES = [
 var BOARD_PATH   = "/tv/board";   // default; a game can override with "path"
 var WARM_CUTOFF  = 8000;    // ms — slower than this means the service was asleep
 var PROBE_TIMEOUT= 75000;   // ms — give a cold Render dyno time to boot
+var RETRY_EVERY  = 5000;    // ms — shared check: wait between tries while waking
 var REPING_EVERY = 300000;  // ms — re-ping every 5 min so nothing sleeps mid-night
 /* ================================================================== */
 
@@ -226,7 +237,75 @@ function launch(i) {
   window.location.href = GAMES[i].origin + boardPath(GAMES[i]);
 }
 
-/* ---- wake + probe every service in parallel ---- */
+/* ---- shared server: one check covers all four games on it ----
+   This proves the shared app is up and serving. It does NOT prove any one
+   board renders, so the wording says "server", never "board ready". */
+var sharedGen = 0;   // bumps on every new check so a stale one can't paint
+
+function setShared(st) {
+  for (var i = 0; i < GAMES.length; i++) {
+    if (GAMES[i].shared) { svcStatus[i] = st; paint(i); }
+  }
+}
+
+function probeShared(firstRun) {
+  var gen = ++sharedGen;
+  var t0 = Date.now();
+  if (firstRun) {
+    setShared({ cls: 'checking', short: 'Checking shared server…', long: 'Checking game server…' });
+  }
+
+  function tryOnce() {
+    if (gen !== sharedGen) { return; }
+    var img = new Image();
+    var settled = false;
+    var left = Math.max(1000, PROBE_TIMEOUT - (Date.now() - t0));
+    var guard = setTimeout(function () { settle(false); }, left);
+
+    function settle(ok) {
+      if (settled) { return; }
+      settled = true;
+      clearTimeout(guard);
+      img.onload = img.onerror = null;
+      if (gen !== sharedGen) { return; }
+      if (ok) { done(); } else { retry(); }
+    }
+    img.onload  = function () { settle((img.naturalWidth || img.width) > 0); };
+    img.onerror = function () { settle(false); };
+    img.src = GUILD_ORIGIN + GUILD_PROBE + '?ping=' + Date.now();
+  }
+
+  function done() {
+    var ms = Date.now() - t0;
+    var secs = Math.round(ms / 1000);
+    if (ms > WARM_CUTOFF) {
+      setShared({ cls: 'woke', short: 'Shared server awake (' + secs + 's cold start)',
+                  long: 'Game server up — woke in ' + secs + 's' });
+    } else {
+      setShared({ cls: 'ready', short: 'Shared server ready', long: 'Game server up' });
+    }
+  }
+
+  // An error inside the wake window is usually Render still booting the
+  // service (or a blip), so keep trying until PROBE_TIMEOUT runs out.
+  function retry() {
+    var ms = Date.now() - t0;
+    if (ms + RETRY_EVERY >= PROBE_TIMEOUT) {
+      setShared({ cls: 'down', short: 'Shared server not responding',
+                  long: 'Game server not responding — asleep, offline or no network' });
+      return;
+    }
+    setShared({ cls: 'checking', short: 'Waiting for shared server… ' + Math.round(ms / 1000) + 's',
+                long: 'Waking the game server — can take 30–60s' });
+    setTimeout(tryOnce, RETRY_EVERY);
+  }
+
+  tryOnce();
+}
+
+/* ---- wake + probe a stand-alone service (Tournaments) ----
+   A no-cors fetch is opaque: it only says *something* answered, which could
+   be an error page. So it reports "responded", not "ready". */
 function probe(i, firstRun) {
   var g = GAMES[i];
   if (firstRun) {
@@ -246,10 +325,10 @@ function probe(i, firstRun) {
       var ms = Date.now() - t0;
       var secs = Math.round(ms / 1000);
       if (ms > WARM_CUTOFF) {
-        svcStatus[i] = { cls: 'woke', short: 'Server awake (' + secs + 's cold start)',
-                      long: 'Board ready — woke in ' + secs + 's' };
+        svcStatus[i] = { cls: 'woke', short: 'Server responded (' + secs + 's cold start)',
+                      long: 'Server responded after ' + secs + 's' };
       } else {
-        svcStatus[i] = { cls: 'ready', short: 'Server ready', long: 'Board ready' };
+        svcStatus[i] = { cls: 'ready', short: 'Server responded', long: 'Server responded' };
       }
       paint(i);
     })
@@ -262,9 +341,15 @@ function probe(i, firstRun) {
 }
 
 function probeAll(firstRun) {
-  for (var i = 0; i < GAMES.length; i++) { probe(i, firstRun); }
+  probeShared(firstRun);   // one request for all four shared games
+  for (var i = 0; i < GAMES.length; i++) {
+    if (!GAMES[i].shared) { probe(i, firstRun); }
+  }
 }
-probeAll(true);
+// Start after 'load': an image request made before it holds the load event
+// open, and Silk would show its page-loading bar for the whole cold start.
+if (document.readyState === 'complete') { probeAll(true); }
+else { window.addEventListener('load', function () { probeAll(true); }); }
 setInterval(function () { probeAll(false); }, REPING_EVERY);
 
 /* ---- the yellow OK button is the only thing that launches ---- */
